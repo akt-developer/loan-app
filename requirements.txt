@@ -1,0 +1,91 @@
+# The Ledger — Loan Risk Assessment
+
+A small full-stack app around your `pred__1_.pkl` model: a scikit-learn
+`LogisticRegression` (22 features) that predicts loan repayment vs. default.
+
+- `index.html` / `style.css` / `script.js` — the frontend (plain HTML/CSS/JS, no build step)
+- `api/predict.py` — a Vercel Python serverless function that loads the model and returns a prediction
+- `api/model.pkl` — your model, copied in as `model.pkl`
+- `requirements.txt` — Python deps for the serverless function
+- `vercel.json` — routes `/api/predict` to the Python function
+
+## ⚠️ One assumption you should verify
+
+Your model's `classes_` are `[0, 1]` but the pickle doesn't store what those
+labels *mean*. I assumed, based on the common "credit risk" dataset this
+looks like: **`0` = loan repaid / approve, `1` = default / decline**. This
+is what `api/predict.py`'s `approved` field is based on. If your training
+notebook used the opposite convention, flip this line in `api/predict.py`:
+
+```python
+"approved": prediction == 0,   # change to `prediction == 1` if your labels are reversed
+```
+
+You can sanity-check this yourself: feed the form a clearly strong
+applicant (high income, high credit score, long credit history, low
+loan-to-income ratio) and a clearly weak one, and confirm the "Approved" /
+"Declined" stamp lands the way you'd expect.
+
+## Run it locally
+
+Vercel's own CLI is the easiest way to run the Python function and static
+site together exactly as they'll run in production:
+
+```bash
+npm install -g vercel
+cd loan-risk-app
+vercel dev
+```
+
+This starts a local server (usually `http://localhost:3000`) serving
+`index.html` and proxying `/api/predict` to the Python function.
+
+## Deploy to Vercel
+
+1. **Push this folder to a GitHub repo** (or any git host Vercel connects to):
+   ```bash
+   cd loan-risk-app
+   git init
+   git add .
+   git commit -m "Loan risk assessment app"
+   git branch -M main
+   git remote add origin <your-repo-url>
+   git push -u origin main
+   ```
+
+2. **Import it in Vercel:**
+   - Go to [vercel.com/new](https://vercel.com/new)
+   - Select your repo
+   - Framework preset: **Other** (it's static + a Python function, no framework needed)
+   - Leave build settings default — there's no build step
+   - Click **Deploy**
+
+3. Vercel will detect `api/predict.py` automatically and deploy it as a
+   serverless function (Python 3.12 runtime, per `vercel.json`), and serve
+   `index.html`, `style.css`, `script.js` as static files.
+
+   Or, skip the GitHub step and deploy straight from your machine:
+   ```bash
+   npm install -g vercel
+   cd loan-risk-app
+   vercel --prod
+   ```
+
+## How the request flows
+
+1. The form collects human-readable fields (age, income, education, etc.)
+2. `script.js` POSTs them as JSON to `/api/predict`
+3. `api/predict.py` turns them into the exact 22-column one-hot row your
+   model was trained on (`build_row()`), in the exact column order from
+   `model.feature_names_in_`
+4. `model.predict_proba()` returns a probability, which the frontend
+   renders as a dial + a stamped verdict
+
+## Notes on the model itself
+
+- Trained with scikit-learn **1.6.1**. `requirements.txt` pins that same
+  version so Vercel's build matches your training environment — unpickling
+  across mismatched sklearn versions can silently produce wrong results.
+- If you ever retrain, re-export as `model.pkl` into `api/` and redeploy —
+  no other code changes needed as long as the same 22 features are used in
+  the same order.

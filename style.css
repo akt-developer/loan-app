@@ -1,0 +1,99 @@
+document.getElementById("today").textContent = new Date().toLocaleDateString("en-US", {
+  weekday: "long", year: "numeric", month: "long", day: "numeric"
+});
+
+const form = document.getElementById("loan-form");
+const submitBtn = document.getElementById("submit-btn");
+const empty = document.getElementById("verdict-empty");
+const result = document.getElementById("verdict-result");
+const errorBox = document.getElementById("verdict-error");
+const gaugeFill = document.getElementById("gauge-fill");
+const gaugeShell = document.getElementById("gauge-shell");
+const dialNumber = document.getElementById("dial-number");
+const dialCaption = document.getElementById("dial-caption");
+const stamp = document.getElementById("stamp");
+const ledgerLines = document.getElementById("ledger-lines");
+
+const CIRCUMFERENCE = 2 * Math.PI * 86; // r=86 circle in the SVG gauge
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  submitBtn.disabled = true;
+  submitBtn.querySelector("span").textContent = "Reading the file…";
+
+  const data = Object.fromEntries(new FormData(form).entries());
+
+  try {
+    const res = await fetch("/api/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "The model could not read this file.");
+
+    renderResult(json, data);
+  } catch (err) {
+    empty.hidden = true;
+    result.hidden = true;
+    errorBox.hidden = false;
+    errorBox.textContent = err.message;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.querySelector("span").textContent = "Run the assessment";
+  }
+});
+
+function renderResult(json, data) {
+  empty.hidden = true;
+  errorBox.hidden = true;
+  result.hidden = false;
+
+  // restart badge pop-in animation
+  stamp.style.animation = "none";
+  void stamp.offsetWidth;
+  stamp.style.animation = "";
+
+  const pctDefault = Math.round(json.probability_default * 100);
+  dialCaption.textContent = "default risk";
+
+  const filled = (pctDefault / 100) * CIRCUMFERENCE;
+  gaugeFill.style.strokeDasharray = `${filled} ${CIRCUMFERENCE}`;
+
+  animateCount(dialNumber, pctDefault);
+
+  if (json.approved) {
+    gaugeFill.style.stroke = "url(#gaugeGradGood)";
+    gaugeShell.classList.remove("bad");
+    stamp.textContent = "Approved";
+    stamp.className = "badge approved";
+  } else {
+    gaugeFill.style.stroke = "url(#gaugeGradBad)";
+    gaugeShell.classList.add("bad");
+    stamp.textContent = "Declined";
+    stamp.className = "badge declined";
+  }
+
+  ledgerLines.innerHTML = `
+    <div><dt>Requested</dt><dd>₹${Number(data.loan_amount).toLocaleString("en-IN")}</dd></div>
+    <div><dt>At</dt><dd>${data.interest_rate}%</dd></div>
+    <div><dt>Against income</dt><dd>${(Number(data.loan_percent_income) * 100).toFixed(0)}%</dd></div>
+    <div><dt>Credit score on file</dt><dd>${data.credit_score}</dd></div>
+  `;
+}
+
+function animateCount(el, target) {
+  const start = 0;
+  const duration = 700;
+  const startTime = performance.now();
+  function tick(now) {
+    const progress = Math.min((now - startTime) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const value = Math.round(start + (target - start) * eased);
+    el.textContent = value + "%";
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
